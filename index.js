@@ -11,17 +11,7 @@ const CONSUMER_KEY = process.env.CONSUMER_KEY;
 const CONSUMER_SECRET = process.env.CONSUMER_SECRET;
 const SHORT_CODE = process.env.SHORT_CODE || "174379";
 const PASSKEY = process.env.PASSKEY || "bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919";
-const CALLBACK_URL = process.env.CALLBACK_URL;
-
-// Firebase Admin for updating orders
-const admin = require("firebase-admin");
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || "{}");
-
-if (!admin.apps.length && serviceAccount.project_id) {
-    admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-    });
-}
+const CALLBACK_URL = process.env.CALLBACK_URL || "https://daraja-server-production.up.railway.app";
 
 // GET ACCESS TOKEN
 async function getAccessToken() {
@@ -47,7 +37,6 @@ app.post("/stk-push", async (req, res) => {
             return res.status(400).json({ success: false, message: "Missing phone, amount or orderId" });
         }
 
-        // Format phone
         let formattedPhone = phone.replace(/\D/g, "");
         if (formattedPhone.startsWith("0")) formattedPhone = "254" + formattedPhone.slice(1);
         if (formattedPhone.startsWith("+")) formattedPhone = formattedPhone.slice(1);
@@ -94,7 +83,7 @@ app.post("/stk-push", async (req, res) => {
         console.error("STK Push error:", error.response?.data || error.message);
         res.status(500).json({
             success: false,
-            message: error.response?.data?.errorMessage || "STK push failed. Try again."
+            message: error.response?.data?.errorMessage || "STK push failed"
         });
     }
 });
@@ -102,38 +91,14 @@ app.post("/stk-push", async (req, res) => {
 // MPESA CALLBACK
 app.post("/mpesa-callback", async (req, res) => {
     try {
+        console.log("Callback received:", JSON.stringify(req.body));
         const callbackData = req.body.Body?.stkCallback;
         if (!callbackData) return res.status(200).send("OK");
 
         const resultCode = callbackData.ResultCode;
         const orderId = callbackData.CallbackMetadata?.Item?.find(i => i.Name === "AccountReference")?.Value;
 
-        console.log(`Callback received - ResultCode: ${resultCode} - Order: ${orderId}`);
-
-        if (admin.apps.length && orderId) {
-            const db = admin.firestore();
-            const snapshot = await db.collection("orders").where("orderId", "==", orderId).get();
-
-            if (resultCode === 0) {
-                const receipt = callbackData.CallbackMetadata?.Item?.find(i => i.Name === "MpesaReceiptNumber")?.Value;
-                const amount = callbackData.CallbackMetadata?.Item?.find(i => i.Name === "Amount")?.Value;
-                snapshot.forEach(doc => {
-                    doc.ref.update({
-                        status: "paid",
-                        mpesaReceiptNumber: receipt,
-                        amountPaid: amount,
-                        paidAt: new Date()
-                    });
-                });
-                console.log(`Payment confirmed: ${receipt}`);
-            } else {
-                snapshot.forEach(doc => {
-                    doc.ref.update({ status: "payment_failed" });
-                });
-                console.log(`Payment failed: ${callbackData.ResultDesc}`);
-            }
-        }
-
+        console.log(`ResultCode: ${resultCode} Order: ${orderId}`);
         res.status(200).send("OK");
     } catch (error) {
         console.error("Callback error:", error);
@@ -141,24 +106,11 @@ app.post("/mpesa-callback", async (req, res) => {
     }
 });
 
-// CHECK ORDER PAYMENT STATUS
+// CHECK PAYMENT STATUS
 app.post("/check-payment", async (req, res) => {
     try {
         const { orderId } = req.body;
-        if (!admin.apps.length) return res.status(500).json({ success: false, message: "Firebase not configured" });
-
-        const db = admin.firestore();
-        const snapshot = await db.collection("orders").where("orderId", "==", orderId).get();
-
-        if (snapshot.empty) return res.status(404).json({ success: false, message: "Order not found" });
-
-        const order = snapshot.docs[0].data();
-        res.json({
-            success: true,
-            status: order.status,
-            mpesaReceiptNumber: order.mpesaReceiptNumber || null
-        });
-
+        res.json({ success: true, status: "pending", orderId });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
