@@ -39,12 +39,9 @@ app.post("/stk-push", async (req, res) => {
         if (formattedPhone.startsWith("+")) formattedPhone = formattedPhone.slice(1);
         if (!formattedPhone.startsWith("254")) formattedPhone = "254" + formattedPhone;
 
-        console.log("Formatted phone:", formattedPhone);
-        console.log("Amount:", amount);
-        console.log("OrderId:", orderId);
+        console.log("Phone:", formattedPhone, "Amount:", amount, "Order:", orderId);
 
         const accessToken = await getAccessToken();
-        console.log("Access token obtained:", accessToken ? "YES" : "NO");
 
         const now = new Date();
         const timestamp =
@@ -71,7 +68,7 @@ app.post("/stk-push", async (req, res) => {
             TransactionDesc: description || `Order ${orderId}`
         };
 
-        console.log("STK payload:", JSON.stringify(payload));
+        console.log("Sending STK push...");
 
         const stkResponse = await axios.post(
             "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
@@ -89,19 +86,18 @@ app.post("/stk-push", async (req, res) => {
 
     } catch (error) {
         const errorData = error.response?.data;
-        const errorMsg = error.message;
-        console.error("STK Push full error:", JSON.stringify(errorData), errorMsg);
+        console.error("STK error:", JSON.stringify(errorData), error.message);
         res.status(500).json({
             success: false,
-            message: errorData?.errorMessage || errorData?.ResultDesc || errorMsg || "STK push failed",
-            fullError: errorData
+            message: errorData?.errorMessage || error.message || "STK push failed",
+            fullError: errorData || ""
         });
     }
 });
 
 app.post("/mpesa-callback", async (req, res) => {
     try {
-        console.log("Callback received:", JSON.stringify(req.body));
+        console.log("Callback:", JSON.stringify(req.body));
         res.status(200).send("OK");
     } catch (error) {
         console.error("Callback error:", error);
@@ -120,4 +116,3 @@ app.post("/check-payment", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Daraja server running on port ${PORT}`));
-// Sun Jul 12 23:49:25 EAT 2026
