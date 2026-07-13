@@ -4,13 +4,13 @@ const cors = require("cors");
 require("dotenv").config();
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 const CONSUMER_KEY = process.env.CONSUMER_KEY;
 const CONSUMER_SECRET = process.env.CONSUMER_SECRET;
-const SHORT_CODE = process.env.SHORT_CODE || "174379";
-const PASSKEY = process.env.PASSKEY || "bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919";
+const SHORT_CODE = "174379";
+const PASSKEY = "bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919";
 const CALLBACK_URL = process.env.CALLBACK_URL || "https://daraja-server-production.up.railway.app";
 
 async function getAccessToken() {
@@ -19,6 +19,7 @@ async function getAccessToken() {
         "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
         { headers: { Authorization: `Basic ${auth}` } }
     );
+    console.log("Token response:", response.data);
     return response.data.access_token;
 }
 
@@ -26,92 +27,74 @@ app.get("/", (req, res) => {
     res.json({ status: "Daraja server running", time: new Date() });
 });
 
+app.options("/stk-push", cors());
 app.post("/stk-push", async (req, res) => {
     try {
         const { phone, amount, orderId, description } = req.body;
+        console.log("STK request:", { phone, amount, orderId });
 
         if (!phone || !amount || !orderId) {
-            return res.status(400).json({ success: false, message: "Missing phone, amount or orderId" });
+            return res.status(400).json({ success: false, message: "Missing fields" });
         }
 
-        let formattedPhone = phone.replace(/\D/g, "");
-        if (formattedPhone.startsWith("0")) formattedPhone = "254" + formattedPhone.slice(1);
-        if (formattedPhone.startsWith("+")) formattedPhone = formattedPhone.slice(1);
-        if (!formattedPhone.startsWith("254")) formattedPhone = "254" + formattedPhone;
+        let p = phone.replace(/\D/g, "");
+        if (p.startsWith("0")) p = "254" + p.slice(1);
+        if (p.startsWith("+")) p = p.slice(1);
+        if (!p.startsWith("254")) p = "254" + p;
+        console.log("Formatted phone:", p);
 
-        console.log("Phone:", formattedPhone, "Amount:", amount, "Order:", orderId);
-
-        const accessToken = await getAccessToken();
+        const token = await getAccessToken();
 
         const now = new Date();
-        const timestamp =
-            now.getFullYear().toString() +
+        const ts =
+            now.getFullYear() +
             String(now.getMonth() + 1).padStart(2, "0") +
             String(now.getDate()).padStart(2, "0") +
             String(now.getHours()).padStart(2, "0") +
             String(now.getMinutes()).padStart(2, "0") +
             String(now.getSeconds()).padStart(2, "0");
 
-        const password = Buffer.from(`${SHORT_CODE}${PASSKEY}${timestamp}`).toString("base64");
+        const password = Buffer.from(`${SHORT_CODE}${PASSKEY}${ts}`).toString("base64");
 
         const payload = {
             BusinessShortCode: SHORT_CODE,
             Password: password,
-            Timestamp: timestamp,
+            Timestamp: ts,
             TransactionType: "CustomerPayBillOnline",
-            Amount: Math.ceil(amount),
-            PartyA: formattedPhone,
+            Amount: Math.ceil(Number(amount)),
+            PartyA: p,
             PartyB: SHORT_CODE,
-            PhoneNumber: formattedPhone,
+            PhoneNumber: p,
             CallBackURL: `${CALLBACK_URL}/mpesa-callback`,
-            AccountReference: orderId,
-            TransactionDesc: description || `Order ${orderId}`
+            AccountReference: String(orderId).substring(0, 12),
+            TransactionDesc: String(description || `Order ${orderId}`).substring(0, 13)
         };
 
-        console.log("Sending STK push...");
+        console.log("Payload:", JSON.stringify(payload));
 
-        const stkResponse = await axios.post(
+        const r = await axios.post(
             "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
             payload,
-            { headers: { Authorization: `Bearer ${accessToken}` } }
+            { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } }
         );
 
-        console.log("STK response:", JSON.stringify(stkResponse.data));
-
-        res.json({
-            success: true,
-            checkoutRequestID: stkResponse.data.CheckoutRequestID,
-            message: "STK push sent. Check your phone."
-        });
+        console.log("Safaricom response:", JSON.stringify(r.data));
+        res.json({ success: true, checkoutRequestID: r.data.CheckoutRequestID, message: "STK push sent" });
 
     } catch (error) {
-        const errorData = error.response?.data;
-        console.error("STK error:", JSON.stringify(errorData), error.message);
-        res.status(500).json({
-            success: false,
-            message: errorData?.errorMessage || error.message || "STK push failed",
-            fullError: errorData || ""
-        });
+        const ed = error.response?.data;
+        console.error("Error:", JSON.stringify(ed), error.message);
+        res.status(500).json({ success: false, message: ed?.errorMessage || error.message, fullError: ed || "" });
     }
 });
 
 app.post("/mpesa-callback", async (req, res) => {
-    try {
-        console.log("Callback:", JSON.stringify(req.body));
-        res.status(200).send("OK");
-    } catch (error) {
-        console.error("Callback error:", error);
-        res.status(200).send("OK");
-    }
+    console.log("Callback:", JSON.stringify(req.body));
+    res.status(200).send("OK");
 });
 
 app.post("/check-payment", async (req, res) => {
-    try {
-        const { orderId } = req.body;
-        res.json({ success: true, status: "pending", orderId });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
+    res.json({ success: true, status: "pending", orderId: req.body.orderId });
 });
 
 const PORT = process.env.PORT || 3000;
