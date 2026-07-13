@@ -58,7 +58,7 @@ app.post("/stk-push", async (req, res) => {
             BusinessShortCode: SHORT_CODE,
             Password: password,
             Timestamp: timestamp,
-            TransactionType: "CustomerBuyGoodsOnline",
+            TransactionType: "CustomerPayBillOnline",
             Amount: Math.ceil(amount),
             PartyA: formattedPhone,
             PartyB: SHORT_CODE,
